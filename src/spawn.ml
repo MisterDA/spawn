@@ -28,10 +28,7 @@ module Unix_backend = struct
          unsuccessful.
 
          In the end we decided not to default to [vfork] on OSX. *)
-      if is_osx then
-        Fork
-      else
-        Vfork
+      if is_osx then Fork else Vfork
 end
 
 module type Env = sig
@@ -70,10 +67,8 @@ module Env_unix : Env = struct
     l
 end
 
-module Env : Env = (val if Sys.win32 then
-                          (module Env_win32)
-                        else
-                          (module Env_unix) : Env)
+module Env : Env = (val if Sys.win32 then (module Env_win32)
+                        else (module Env_unix) : Env)
 
 module Pgid = struct
   type t = int
@@ -84,10 +79,8 @@ module Pgid = struct
     | 0 ->
       raise (Invalid_argument "bad pid: 0 (hint: use [Pgid.new_process_group])")
     | t ->
-      if t < 0 then
-        raise (Invalid_argument ("bad pid: " ^ string_of_int t))
-      else
-        t
+      if t < 0 then raise (Invalid_argument ("bad pid: " ^ string_of_int t))
+      else t
 end
 
 external spawn_unix :
@@ -138,31 +131,14 @@ let no_null s =
 let spawn ?env ?(cwd = Working_dir.Inherit) ~prog ~argv ?(stdin = Unix.stdin)
     ?(stdout = Unix.stdout) ?(stderr = Unix.stderr)
     ?(unix_backend = Unix_backend.default) ?setpgid () =
-  (match cwd with
-  | Path s -> no_null s
-  | Fd _
-  | Inherit ->
-    ());
+  (match cwd with Path s -> no_null s | Fd _ | Inherit -> ());
   no_null prog;
   List.iter argv ~f:no_null;
-  let backend =
-    if Sys.win32 then
-      spawn_windows
-    else
-      spawn_unix
-  in
-  let use_vfork =
-    match unix_backend with
-    | Vfork -> true
-    | Fork -> false
-  in
+  let backend = if Sys.win32 then spawn_windows else spawn_unix in
+  let use_vfork = match unix_backend with Vfork -> true | Fork -> false in
   backend ~env ~cwd ~prog ~argv ~stdin ~stdout ~stderr ~use_vfork ~setpgid
 
 external safe_pipe : unit -> Unix.file_descr * Unix.file_descr = "spawn_pipe"
 
 let safe_pipe =
-  if Sys.win32 then
-    fun () ->
-  Unix.pipe ~cloexec:true ()
-  else
-    safe_pipe
+  if Sys.win32 then fun () -> Unix.pipe ~cloexec:true () else safe_pipe
