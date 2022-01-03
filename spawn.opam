@@ -28,6 +28,7 @@ bug-reports: "https://github.com/janestreet/spawn/issues"
 depends: [
   "dune" {>= "2.8"}
   "ppx_expect" {with-test}
+  "ppx_bench" {with-test}
   "ocaml" {>= "4.05"}
   "odoc" {with-doc}
 ]

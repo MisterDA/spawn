@@ -13,6 +13,7 @@
  (name spawn)
  (depends
   (ppx_expect :with-test)
+  (ppx_bench :with-test)
   (ocaml (>= 4.05)))
  (synopsis "Spawning sub-processes")
  (description "\
