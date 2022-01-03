@@ -563,7 +563,8 @@ CAMLprim value spawn_windows(value v_env,
 {
   STARTUPINFO si;
   PROCESS_INFORMATION pi;
-  DWORD flags;
+  DWORD flags, err;
+  wchar_t *prog, *cmdline, *env, *cwd;
 
   ZeroMemory(&si, sizeof(si));
   ZeroMemory(&pi, sizeof(pi));
@@ -578,23 +579,40 @@ CAMLprim value spawn_windows(value v_env,
     uerror("DuplicateHandle", Nothing);
   }
 
+  prog = caml_stat_strdup_to_utf16(String_val(v_prog));
+  cmdline = caml_stat_strdup_to_utf16(Bytes_val(v_cmdline));
+  if (Is_block(v_env))
+      env = caml_stat_strdup_to_utf16(Bytes_val(Field(v_env, 0)));
+  else
+      env = NULL;
+  if (Is_block(v_cwd))
+    cwd = caml_stat_strdup_to_utf16(String_val(Field(v_cwd, 0)));
+  else
+    cwd = NULL;
+
   flags = CREATE_UNICODE_ENVIRONMENT;
-  if (!CreateProcess(String_val(v_prog),
-                     Bytes_val(v_cmdline),
-                     NULL,
-                     NULL,
-                     TRUE,
-                     flags,
-                     Is_block(v_env) ? Bytes_val(Field(v_env, 0)) : NULL,
-                     Is_block(v_cwd) ? String_val(Field(v_cwd, 0)) : NULL,
-                     &si,
-                     &pi)) {
+  err = CreateProcess(prog,
+                      cmdline,
+                      NULL,
+                      NULL,
+                      TRUE,
+                      flags,
+                      env,
+                      cwd,
+                      &si,
+                      &pi);
+  if (err != ERROR_SUCCESS)
     win32_maperr(GetLastError());
-    close_std_handles(&si);
-    uerror("CreateProcess", Nothing);
-  }
 
   close_std_handles(&si);
+  if (cwd != NULL) caml_stat_free(cwd);
+  if (env != NULL) caml_stat_free(env);
+  caml_stat_free(cmdline);
+  caml_stat_free(prog);
+
+  if (err != ERROR_SUCCESS)
+    uerror("CreateProcess", Nothing);
+
   CloseHandle(pi.hThread);
 
   return Val_long(pi.hProcess);
