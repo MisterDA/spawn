@@ -563,6 +563,7 @@ CAMLprim value spawn_windows(value v_env,
 {
   STARTUPINFO si;
   PROCESS_INFORMATION pi;
+  DWORD flags;
 
   ZeroMemory(&si, sizeof(si));
   ZeroMemory(&pi, sizeof(pi));
@@ -577,12 +578,13 @@ CAMLprim value spawn_windows(value v_env,
     uerror("DuplicateHandle", Nothing);
   }
 
+  flags = CREATE_UNICODE_ENVIRONMENT;
   if (!CreateProcess(String_val(v_prog),
                      Bytes_val(v_cmdline),
                      NULL,
                      NULL,
                      TRUE,
-                     0,
+                     flags,
                      Is_block(v_env) ? Bytes_val(Field(v_env, 0)) : NULL,
                      Is_block(v_cwd) ? String_val(Field(v_cwd, 0)) : NULL,
                      &si,
