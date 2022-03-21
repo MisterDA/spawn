@@ -537,20 +537,27 @@ CAMLprim value spawn_unix(value v_env,
   unix_error(ENOSYS, "spawn_unix", Nothing);
 }
 
-static BOOL dup2_and_clear_close_on_exec(value fd, HANDLE *res)
+/* Ensures the handle [h] is inheritable. Returns the handle for the
+   child process in [hStd] and in [to_close] if it needs to be closed
+   after CreateProcess. */
+static int ensure_inheritable(value v_h /* in */,
+                              HANDLE * hStd /* out */,
+                              HANDLE * to_close /* out */)
 {
-  return DuplicateHandle(GetCurrentProcess(), Handle_val(fd),
-                         GetCurrentProcess(), res,
-                         0L,
-                         TRUE,
-                         DUPLICATE_SAME_ACCESS);
-}
+  DWORD flags;
+  HANDLE hp, h = Handle_val(h);
 
-static void close_std_handles(STARTUPINFO *si)
-{
-  if (si->hStdInput  != NULL) CloseHandle(si->hStdInput );
-  if (si->hStdOutput != NULL) CloseHandle(si->hStdOutput);
-  if (si->hStdError  != NULL) CloseHandle(si->hStdError );
+  if (! GetHandleInformation(h, &flags))
+    return 0;
+  hp = GetCurrentProcess();
+  if (! (flags & HANDLE_FLAG_INHERIT)) {
+    if (! DuplicateHandle(hp, h, hp, hStd, 0, TRUE, DUPLICATE_SAME_ACCESS))
+      return 0;
+    *to_close = *hStd;
+  } else {
+    *hStd = h;
+  }
+  return 1;
 }
 
 CAMLprim value spawn_windows(value v_env,
@@ -565,26 +572,28 @@ CAMLprim value spawn_windows(value v_env,
   PROCESS_INFORMATION pi;
   DWORD flags, err;
   wchar_t *prog, *cmdline, *env, *cwd;
+  HANDLE to_close0 = INVALID_HANDLE_VALUE, to_close1 = INVALID_HANDLE_VALUE,
+    to_close2 = INVALID_HANDLE_VALUE;
 
   ZeroMemory(&si, sizeof(si));
   ZeroMemory(&pi, sizeof(pi));
   si.cb = sizeof(si);
   si.dwFlags    = STARTF_USESTDHANDLES;
 
-  if (!dup2_and_clear_close_on_exec(v_stdin , &si.hStdInput ) ||
-      !dup2_and_clear_close_on_exec(v_stdout, &si.hStdOutput) ||
-      !dup2_and_clear_close_on_exec(v_stderr, &si.hStdError )) {
-    win32_maperr(GetLastError());
-    close_std_handles(&si);
-    uerror("DuplicateHandle", Nothing);
+  /* If needed, duplicate the handles fd1, fd2, fd3 to make sure they
+     are inheritable. */
+  if (! ensure_inheritable(v_stdin, &si.hStdInput, &to_close0) ||
+      ! ensure_inheritable(v_stdout, &si.hStdOutput, &to_close1) ||
+      ! ensure_inheritable(v_stderr, &si.hStdError, &to_close2)) {
+    err = GetLastError(); goto ret;
   }
 
   prog = caml_stat_strdup_to_utf16(String_val(v_prog));
   cmdline = caml_stat_strdup_to_utf16(Bytes_val(v_cmdline));
   if (Is_block(v_env))
-      env = caml_stat_strdup_to_utf16(Bytes_val(Field(v_env, 0)));
+    env = caml_stat_strdup_to_utf16(Bytes_val(Field(v_env, 0)));
   else
-      env = NULL;
+    env = NULL;
   if (Is_block(v_cwd))
     cwd = caml_stat_strdup_to_utf16(String_val(Field(v_cwd, 0)));
   else
@@ -601,19 +610,24 @@ CAMLprim value spawn_windows(value v_env,
                       cwd,
                       &si,
                       &pi);
-  if (err != ERROR_SUCCESS)
-    win32_maperr(GetLastError());
+  if (err != ERROR_SUCCESS) {
+    win32_maperr(GetLastError()); goto ret;
+  }
+  CloseHandle(pi.hThread);
 
-  close_std_handles(&si);
+ ret:
   if (cwd != NULL) caml_stat_free(cwd);
   if (env != NULL) caml_stat_free(env);
   caml_stat_free(cmdline);
   caml_stat_free(prog);
 
+  /* Close the handles if we duplicated them above. */
+  if (to_close1 != INVALID_HANDLE_VALUE) CloseHandle(to_close1);
+  if (to_close2 != INVALID_HANDLE_VALUE) CloseHandle(to_close2);
+  if (to_close3 != INVALID_HANDLE_VALUE) CloseHandle(to_close3);
+
   if (err != ERROR_SUCCESS)
     uerror("CreateProcess", Nothing);
-
-  CloseHandle(pi.hThread);
 
   return Val_long(pi.hProcess);
 }
